@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 const els = {
   text: $("text"), meta: $("text-meta"), paste: $("paste-btn"), clear: $("clear-btn"),
-  voice: $("voice"), speed: $("speed"), speedOut: $("speed-out"),
+  voice: $("voice"), voiceMeta: $("voice-meta"), speed: $("speed"), speedOut: $("speed-out"),
   go: $("go-btn"), goLabel: $("go-label"),
   status: $("status"), statusText: $("status-text"), bar: $("bar-fill"), stop: $("stop-btn"),
   result: $("result"), player: $("player"), resultMeta: $("result-meta"),
@@ -17,7 +17,8 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
 };
 els.text.value = store.get("ra:text") || "";
-if (store.get("ra:voice")) els.voice.value = store.get("ra:voice");
+const savedVoice = store.get("ra:voice");
+if (savedVoice && [...els.voice.options].some((o) => o.value === savedVoice)) els.voice.value = savedVoice;
 if (store.get("ra:speed")) els.speed.value = store.get("ra:speed");
 
 function updateMeta() {
@@ -27,12 +28,23 @@ function updateMeta() {
     ? `${words.toLocaleString("en-US")} words · about ${formatDuration(minutes * 60)} of audio`
     : "0 words";
 }
+const engineOf = (v) => v.split(":")[0];
+const voiceIdOf = (v) => v.split(":")[1];
+const readyVoices = new Set();
+function updateVoiceMeta() {
+  const v = els.voice.value;
+  els.voiceMeta.textContent = readyVoices.has(v)
+    ? "Ready on this device."
+    : engineOf(v) === "kokoro"
+      ? "Most natural sound, but slow on most phones. One-time download: about 90 MB."
+      : "Fast. One-time download the first time you use this voice: about 60 MB.";
+}
 function updateSpeed() { els.speedOut.textContent = `${Number(els.speed.value).toFixed(1)}×`; }
 
 els.text.addEventListener("input", () => { store.set("ra:text", els.text.value); updateMeta(); });
-els.voice.addEventListener("change", () => store.set("ra:voice", els.voice.value));
+els.voice.addEventListener("change", () => { store.set("ra:voice", els.voice.value); updateVoiceMeta(); });
 els.speed.addEventListener("input", () => { store.set("ra:speed", els.speed.value); updateSpeed(); updateMeta(); });
-updateSpeed(); updateMeta();
+updateSpeed(); updateMeta(); updateVoiceMeta();
 
 els.paste.addEventListener("click", async () => {
   try {
@@ -80,15 +92,17 @@ function splitText(text) {
 }
 
 /* ---------- engine ---------- */
-let worker = null;
-let modelReady = false;
-function getWorker() {
-  if (!worker) {
-    worker = new Worker(new URL("worker.js", import.meta.url), { type: "module" });
-    worker.onmessage = onWorkerMessage;
-    worker.onerror = (e) => fail(e.message || "The voice engine could not start. Check your connection and try again.");
+// Each engine runs in its own background thread.
+const ENGINE_FILES = { piper: "worker-piper.js", kokoro: "worker.js" };
+const workers = {};
+function getWorker(engine) {
+  if (!workers[engine]) {
+    const w = new Worker(new URL(ENGINE_FILES[engine], import.meta.url), { type: "module" });
+    w.onmessage = onWorkerMessage;
+    w.onerror = (e) => { delete workers[engine]; fail(e.message || "The voice engine could not start."); };
+    workers[engine] = w;
   }
-  return worker;
+  return workers[engine];
 }
 
 /* ---------- live playback while generating ---------- */
@@ -136,20 +150,31 @@ els.go.addEventListener("click", () => {
     els.text.focus();
     return;
   }
+  // Pick a voice that matches the language of the text.
+  const cyrillic = (els.text.value.match(/[Ѐ-ӿ]/g) || []).length;
+  const latin = (els.text.value.match(/[A-Za-z]/g) || []).length;
+  const russianVoice = els.voice.value.includes("ru_RU");
+  if (cyrillic > latin !== russianVoice) {
+    els.voice.value = russianVoice ? "piper:en_US-lessac-medium" : "piper:ru_RU-irina-medium";
+    els.voice.dispatchEvent(new Event("change"));
+    showStatus(`Your text looks ${russianVoice ? "English" : "Russian"}, so a matching voice is selected. Tap Create audio again.`);
+    return;
+  }
   startLive();
   els.player.pause();
-  job = { id: ++jobCounter, chunks, parts: [], rate: 24000 };
+  const voice = els.voice.value;
+  job = { id: ++jobCounter, chunks, parts: [], rate: 24000, voice, engine: engineOf(voice) };
   setBusy(true);
-  showStatus(modelReady ? "Creating audio…" : "Loading voice…", { progress: 0, stoppable: true });
-  getWorker().postMessage({
+  showStatus(readyVoices.has(voice) ? "Creating audio…" : "Loading voice…", { progress: 0, stoppable: true });
+  getWorker(job.engine).postMessage({
     type: "generate", id: job.id, chunks,
-    voice: els.voice.value, speed: Number(els.speed.value),
+    voice: voiceIdOf(voice), speed: Number(els.speed.value),
   });
 });
 
 els.stop.addEventListener("click", () => {
   if (!job) return;
-  worker?.postMessage({ type: "cancel" });
+  workers[job.engine]?.postMessage({ type: "cancel" });
   stopLive();
   const partial = job.parts.length ? job : null;
   job = null;
@@ -162,11 +187,14 @@ function onWorkerMessage({ data: msg }) {
   if (msg.type === "loading") {
     if (!job) return;
     const mb = (n) => (n / 1048576).toFixed(0);
-    showStatus(`Downloading voice (one time only): ${mb(msg.loaded)} of ${mb(msg.total)} MB`,
-      { progress: msg.loaded / msg.total, stoppable: true });
+    showStatus(`Downloading voice (one time only): ${mb(msg.loaded)}${msg.total ? ` of ${mb(msg.total)}` : ""} MB`,
+      { progress: msg.total ? msg.loaded / msg.total : 0, stoppable: true });
   } else if (msg.type === "ready") {
-    modelReady = true;
-    if (job) showStatus("Creating audio…", { progress: 0, stoppable: true });
+    if (job && !readyVoices.has(job.voice)) {
+      readyVoices.add(job.voice);
+      updateVoiceMeta();
+      if (!job.parts.length) showStatus("Creating audio…", { progress: 0, stoppable: true });
+    }
   } else if (msg.type === "chunk") {
     if (!job || msg.id !== job.id) return;
     job.parts[msg.index] = msg.samples;
@@ -273,8 +301,19 @@ function encodeWav(parts, rate, gapSec) {
   return new Blob([buffer], { type: "audio/wav" });
 }
 
-/* ---------- warm up + offline support ---------- */
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
-// Start loading the voice in the background so the first tap is faster.
-if (store.get("ra:used")) getWorker().postMessage({ type: "load" });
-els.go.addEventListener("click", () => store.set("ra:used", "1"));
+/* ---------- offline support + multi-core speed-up ---------- */
+// The service worker adds headers that let the engine use several CPU cores.
+// They only apply after a reload, so reload once when it first takes over.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").then(() => {
+    let tried = false;
+    try { tried = sessionStorage.getItem("ra:reloaded") === "1"; } catch {}
+    if (window.crossOriginIsolated || tried) return;
+    const reload = () => {
+      try { sessionStorage.setItem("ra:reloaded", "1"); } catch {}
+      if (!job) location.reload();
+    };
+    if (navigator.serviceWorker.controller) reload();
+    else navigator.serviceWorker.addEventListener("controllerchange", reload, { once: true });
+  }).catch(() => {});
+}

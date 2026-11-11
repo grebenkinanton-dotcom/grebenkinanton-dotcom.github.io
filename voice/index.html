@@ -15,7 +15,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" crossorigin>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -36,28 +36,42 @@
         <button type="button" class="link-btn" id="clear-btn">Clear</button>
       </div>
     </div>
-    <textarea id="text" rows="8" placeholder="Paste or type English text here…" spellcheck="true"></textarea>
+    <textarea id="text" rows="8" placeholder="Paste or type text here…" spellcheck="true"></textarea>
     <div class="meta" id="text-meta">0 words</div>
   </section>
 
   <section class="card" aria-label="Voice settings">
     <label for="voice">Voice</label>
     <select id="voice">
-      <optgroup label="American English">
-        <option value="af_heart">Heart — warm, female</option>
-        <option value="af_bella">Bella — bright, female</option>
-        <option value="af_nicole">Nicole — soft, female</option>
-        <option value="am_michael">Michael — calm, male</option>
-        <option value="am_fenrir">Fenrir — deep, male</option>
-        <option value="am_puck">Puck — lively, male</option>
+      <optgroup label="Fast · American English">
+        <option value="piper:en_US-lessac-medium">Lessac — clear, female</option>
+        <option value="piper:en_US-hfc_female-medium">Hailey — warm, female</option>
+        <option value="piper:en_US-amy-medium">Amy — bright, female</option>
+        <option value="piper:en_US-ryan-medium">Ryan — calm, male</option>
+        <option value="piper:en_US-hfc_male-medium">Hank — deep, male</option>
+        <option value="piper:en_US-joe-medium">Joe — friendly, male</option>
       </optgroup>
-      <optgroup label="British English">
-        <option value="bf_emma">Emma — clear, female</option>
-        <option value="bf_isabella">Isabella — gentle, female</option>
-        <option value="bm_george">George — classic, male</option>
-        <option value="bm_fable">Fable — storyteller, male</option>
+      <optgroup label="Fast · British English">
+        <option value="piper:en_GB-cori-medium">Cori — gentle, female</option>
+        <option value="piper:en_GB-alba-medium">Alba — Scottish, female</option>
+        <option value="piper:en_GB-alan-medium">Alan — classic, male</option>
+        <option value="piper:en_GB-northern_english_male-medium">Northern — warm, male</option>
+      </optgroup>
+      <optgroup label="Fast · Russian">
+        <option value="piper:ru_RU-irina-medium">Irina — female</option>
+        <option value="piper:ru_RU-dmitri-medium">Dmitri — male</option>
+        <option value="piper:ru_RU-denis-medium">Denis — male</option>
+        <option value="piper:ru_RU-ruslan-medium">Ruslan — male</option>
+      </optgroup>
+      <optgroup label="HD · most natural, slow on phones">
+        <option value="kokoro:af_heart">Heart HD — warm, female</option>
+        <option value="kokoro:af_bella">Bella HD — bright, female</option>
+        <option value="kokoro:am_michael">Michael HD — calm, male</option>
+        <option value="kokoro:bf_emma">Emma HD — British, female</option>
+        <option value="kokoro:bm_george">George HD — British, male</option>
       </optgroup>
     </select>
+    <div class="meta" id="voice-meta"></div>
 
     <div class="speed-row">
       <label for="speed">Speed</label>
@@ -89,7 +103,7 @@
   </section>
 
   <footer class="foot">
-    <p>Free and private: the voice runs on your device, your text never leaves it. The first run downloads the voice model (about 90&nbsp;MB) once.</p>
+    <p>Free and private: the voice runs on your device, your text never leaves it. Each voice is downloaded once the first time you use it (about 60&nbsp;MB, best on Wi&#8209;Fi), then works offline.</p>
     <p class="tip">Tip: add this page to your home screen to use it like an app.</p>
   </footer>
 </main>
