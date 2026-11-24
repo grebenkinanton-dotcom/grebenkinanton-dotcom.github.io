@@ -1,0 +1,19 @@
+-- Node Align hotkeys for the Nodes (Flow) view.
+-- Copy this file into Fusion's Config folder and restart Fusion / Resolve.
+-- Change the keys below if they clash with your own bindings.
+{
+	Hotkeys {
+		Target = "FlowView",
+		Defaults = true,
+
+		ALT_A       = "RunScript{ filename = 'Scripts:Comp/NodeAlign/Align_Auto.lua' }",
+		ALT_H       = "RunScript{ filename = 'Scripts:Comp/NodeAlign/Align_Horizontal.lua' }",
+		ALT_V       = "RunScript{ filename = 'Scripts:Comp/NodeAlign/Align_Vertical.lua' }",
+		ALT_SHIFT_H = "RunScript{ filename = 'Scripts:Comp/NodeAlign/Straighten_Row.lua' }",
+		ALT_SHIFT_V = "RunScript{ filename = 'Scripts:Comp/NodeAlign/Straighten_Column.lua' }",
+		ALT_D       = "RunScript{ filename = 'Scripts:Comp/NodeAlign/Distribute_Horizontal.lua' }",
+		ALT_SHIFT_D = "RunScript{ filename = 'Scripts:Comp/NodeAlign/Distribute_Vertical.lua' }",
+		ALT_S       = "RunScript{ filename = 'Scripts:Comp/NodeAlign/Spread.lua' }",
+		ALT_SHIFT_S = "RunScript{ filename = 'Scripts:Comp/NodeAlign/Tighten.lua' }",
+	},
+}
