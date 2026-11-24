@@ -24,6 +24,7 @@ jobs:
         run: >
           pyinstaller --noconfirm --onefile --windowed
           --name MP4toJPG
+          --icon icon.ico --add-data "icon.ico:."
           --collect-all imageio_ffmpeg
           mp4_to_jpg.py
       - name: Smoke test bundled ffmpeg

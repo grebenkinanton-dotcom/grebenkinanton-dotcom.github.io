@@ -732,8 +732,19 @@ class MainWindow(QMainWindow):
         e.accept()
 
 
+def resource(name: str) -> Path:
+    """Path to a bundled file, both from source and inside the PyInstaller exe."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base / name
+
+
 def make_icon() -> QIcon:
-    """Simple film-frame icon drawn in code (no external files needed)."""
+    """App icon from icon.ico; falls back to a simple icon drawn in code."""
+    ico = resource("icon.ico")
+    if ico.is_file():
+        icon = QIcon(str(ico))
+        if not icon.isNull():
+            return icon
     icon = QIcon()
     for size in (16, 24, 32, 48, 64, 256):
         pm = QPixmap(size, size)
@@ -770,6 +781,7 @@ def main():
     if sys.platform == "win32":
         app.setFont(QFont("Segoe UI", 9))
     app.setApplicationName(APP_NAME)
+    app.setWindowIcon(make_icon())
     win = MainWindow()
     # Files passed on the command line (e.g. dropped onto the .exe icon)
     args = [a for a in sys.argv[1:] if Path(a).suffix.lower() in VIDEO_EXTS]
