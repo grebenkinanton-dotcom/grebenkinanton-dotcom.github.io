@@ -1,0 +1,22 @@
+{
+  "name": "MP4 to JPG Sequence",
+  "short_name": "MP4 to JPG",
+  "description": "Turn MP4 videos into JPG image sequences. Drag and drop, runs on your PC, nothing is uploaded.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f3f3",
+  "theme_color": "#f3f3f3",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": { "video/mp4": [".mp4", ".m4v"], "video/quicktime": [".mov"] },
+      "launch_type": "multiple-clients"
+    }
+  ]
+}

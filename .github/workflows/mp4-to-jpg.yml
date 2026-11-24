@@ -3,7 +3,7 @@ name: Build MP4 to JPG (Windows)
 on:
   push:
     paths:
-      - "mp4-to-jpg/**"
+      - "mp4-to-jpg/desktop/**"
       - ".github/workflows/mp4-to-jpg.yml"
   workflow_dispatch:
 
@@ -12,7 +12,7 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: mp4-to-jpg
+        working-directory: mp4-to-jpg/desktop
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,4 +35,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: MP4toJPG-windows
-          path: mp4-to-jpg/dist/MP4toJPG.exe
+          path: mp4-to-jpg/desktop/dist/MP4toJPG.exe

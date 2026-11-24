@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MP4 to JPG Sequence</title>
+<meta name="description" content="Turn MP4 videos into JPG image sequences. Drag and drop, runs in your browser, nothing is uploaded.">
+<meta name="theme-color" content="#f3f3f3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#202020" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="window">
+  <header class="titlebar">
+    <img src="icon-192.png" alt="" width="20" height="20">
+    <h1>MP4 to JPG Sequence</h1>
+    <button type="button" id="install" class="btn subtle" hidden>Install app</button>
+  </header>
+
+  <main class="content">
+    <div id="unsupported" class="infobar warn" hidden></div>
+
+    <section id="drop" class="drop" tabindex="0" role="button" aria-describedby="drop-hint">
+      <svg class="drop-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="drop-title">Drag MP4 files or a folder here</div>
+      <div id="drop-hint" class="drop-hint">or <button type="button" id="pick-folder" class="link">choose a folder</button> · <button type="button" id="pick-files" class="link">choose files</button></div>
+      <input type="file" id="file-input" accept=".mp4,.m4v,.mov,video/mp4,video/quicktime" multiple hidden>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Files</h2>
+        <div class="row gap">
+          <button type="button" id="remove" class="btn" disabled>Remove</button>
+          <button type="button" id="clear" class="btn" disabled>Clear list</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="files">
+          <thead><tr><th>Video</th><th class="col-out">Output folder</th><th class="col-status">Status</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="empty" class="empty">No videos yet.</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Output</h2></div>
+      <div class="field">
+        <label for="out-path">Output path</label>
+        <div class="row gap grow">
+          <input id="out-path" class="input grow" readonly>
+          <button type="button" id="out-change" class="btn">Change…</button>
+          <button type="button" id="out-reset" class="btn" disabled>Next to MP4</button>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="quality">JPG quality <span id="quality-val" class="muted"></span></label>
+          <input id="quality" type="range" min="1" max="100" value="92">
+        </div>
+        <div class="field small">
+          <label for="start">First frame number</label>
+          <input id="start" class="input" type="number" min="0" max="999999" value="1">
+        </div>
+      </div>
+    </section>
+
+    <section class="actions">
+      <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="progress-bar"></div>
+      </div>
+      <div class="row gap end">
+        <span id="progress-text" class="muted grow"></span>
+        <button type="button" id="cancel" class="btn" disabled>Cancel</button>
+        <button type="button" id="convert" class="btn accent" disabled>Convert</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="statusbar" id="status" aria-live="polite">Ready. Drop MP4 files to begin. Videos stay on this PC; nothing is uploaded.</footer>
+</div>
+
+<!-- Name dialog -->
+<dialog id="name-dlg" class="dialog">
+  <form method="dialog">
+    <h3>Sequence name</h3>
+    <p class="dlg-intro">Choose a name for the frames of <b id="dlg-video"></b>.</p>
+    <div class="field">
+      <label for="dlg-name">File name</label>
+      <input id="dlg-name" class="input" maxlength="180" autocomplete="off" spellcheck="false">
+    </div>
+    <label class="check"><input type="checkbox" id="dlg-keep"><span class="box"></span>Keep the name</label>
+    <label class="check" id="dlg-all-wrap"><input type="checkbox" id="dlg-all"><span class="box"></span><span id="dlg-all-text"></span></label>
+
+    <div class="field">
+      <label>Save in</label>
+      <div class="row gap">
+        <div id="dlg-folder" class="input grow readonly"></div>
+        <button type="button" id="dlg-folder-btn" class="btn">Choose…</button>
+      </div>
+      <div id="dlg-folder-hint" class="hint"></div>
+    </div>
+
+    <fieldset class="preview">
+      <legend>Preview</legend>
+      <div><span class="muted">Folder:</span> <span id="dlg-prev-dir"></span></div>
+      <div><span class="muted">Frames:</span> <span id="dlg-prev-file"></span></div>
+    </fieldset>
+    <div id="dlg-error" class="error"></div>
+    <div class="dlg-buttons">
+      <button type="submit" value="ok" id="dlg-ok" class="btn accent">Convert</button>
+      <button type="submit" value="cancel" class="btn">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Existing frames dialog -->
+<dialog id="conflict-dlg" class="dialog">
+  <form method="dialog">
+    <h3><span class="warn-icon" aria-hidden="true">!</span> Folder already exists</h3>
+    <p id="conflict-text"></p>
+    <p>Do you want to replace them?</p>
+    <div class="dlg-buttons">
+      <button type="submit" value="replace" class="btn accent">Replace</button>
+      <button type="submit" value="rename" class="btn">Choose another name</button>
+      <button type="submit" value="cancel" class="btn">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
