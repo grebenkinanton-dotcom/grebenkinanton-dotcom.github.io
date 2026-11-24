@@ -110,12 +110,62 @@ local function plan(mode, nodes, anchor)
 	return nodes
 end
 
+local function safe(fn)
+	local ok, v = pcall(fn)
+	if ok then return v end
+	return nil
+end
+
+local function isFlow(v)
+	return v ~= nil and safe(function() return v.GetPosTable end) ~= nil
+end
+
+-- Find the Nodes view. Fusion Studio and Resolve expose it in different ways,
+-- so try several routes and report what was found if all of them fail.
+local function findFlow(c)
+	local tried = {}
+	local function try(label, fn)
+		local v = safe(fn)
+		tried[#tried + 1] = label .. " = " .. tostring(v)
+		if isFlow(v) then return v end
+	end
+
+	local frame = safe(function() return c.CurrentFrame end)
+	local flow = try("comp.CurrentFrame.FlowView", function() return frame.FlowView end)
+	if flow then return flow end
+
+	local frames = safe(function() return c:GetFrameList() end) or {}
+	for i, f in pairs(frames) do
+		flow = try("frame[" .. tostring(i) .. "].FlowView", function() return f.FlowView end)
+		if flow then return flow end
+	end
+
+	local all = {}
+	if frame then all[#all + 1] = frame end
+	for _, f in pairs(frames) do all[#all + 1] = f end
+	for _, f in ipairs(all) do
+		local views = safe(function() return f:GetViewList() end) or {}
+		for id, v in pairs(views) do
+			if string.find(string.lower(tostring(id)), "flow") then
+				flow = try("view " .. tostring(id), function() return v end)
+				if flow then return flow end
+			end
+		end
+	end
+
+	print("Node Align: no Nodes view found. Tried:")
+	for _, t in ipairs(tried) do print("  " .. t) end
+	local host = (fu or fusion or app)
+	print("  host = " .. tostring(safe(function() return host:GetAttrs().FUSIONS_FileName end))
+		.. ", version = " .. tostring(safe(function() return host:GetAttrs().FUSIONS_Version end)))
+	return nil
+end
+
 local function run(mode)
-	local c = comp or (fu and fu:GetCurrentComp())
+	local c = comp or (fu and fu:GetCurrentComp()) or (fusion and fusion:GetCurrentComp())
 	if not c then print("Node Align: no composition open") return end
-	local frame = c.CurrentFrame
-	local flow = frame and frame.FlowView
-	if not flow then print("Node Align: no Nodes view found") return end
+	local flow = findFlow(c)
+	if not flow then return end
 
 	local nodes = collect(c, flow)
 	if #nodes < 2 then print("Node Align: select at least two nodes") return end
