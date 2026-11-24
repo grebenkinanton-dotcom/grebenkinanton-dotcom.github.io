@@ -1,0 +1,37 @@
+name: Build MP4 to JPG (Windows)
+
+on:
+  push:
+    paths:
+      - "mp4-to-jpg/**"
+      - ".github/workflows/mp4-to-jpg.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: mp4-to-jpg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Build exe
+        run: >
+          pyinstaller --noconfirm --onefile --windowed
+          --name MP4toJPG
+          --collect-all imageio_ffmpeg
+          mp4_to_jpg.py
+      - name: Smoke test bundled ffmpeg
+        shell: pwsh
+        run: |
+          python -c "import imageio_ffmpeg,subprocess;subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-version'],check=True)"
+          Get-Item dist/MP4toJPG.exe | Format-List Name,Length
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MP4toJPG-windows
+          path: mp4-to-jpg/dist/MP4toJPG.exe
