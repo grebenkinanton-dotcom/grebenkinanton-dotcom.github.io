@@ -57,6 +57,7 @@
           <button type="button" id="out-change" class="btn">Change…</button>
           <button type="button" id="out-reset" class="btn" disabled>Next to MP4</button>
         </div>
+        <label class="check"><input type="checkbox" id="out-zip"><span class="box"></span>Download as ZIP instead</label>
       </div>
       <div class="field-row">
         <div class="field">
@@ -97,19 +98,11 @@
     <label class="check"><input type="checkbox" id="dlg-keep"><span class="box"></span>Keep the name</label>
     <label class="check" id="dlg-all-wrap"><input type="checkbox" id="dlg-all"><span class="box"></span><span id="dlg-all-text"></span></label>
 
-    <div class="field">
-      <label>Save in</label>
-      <div class="row gap">
-        <div id="dlg-folder" class="input grow readonly"></div>
-        <button type="button" id="dlg-folder-btn" class="btn">Choose…</button>
-      </div>
-      <div id="dlg-folder-hint" class="hint"></div>
-    </div>
-
     <fieldset class="preview">
       <legend>Preview</legend>
       <div><span class="muted">Folder:</span> <span id="dlg-prev-dir"></span></div>
       <div><span class="muted">Frames:</span> <span id="dlg-prev-file"></span></div>
+      <div id="dlg-prev-note" class="hint" hidden></div>
     </fieldset>
     <div id="dlg-error" class="error"></div>
     <div class="dlg-buttons">

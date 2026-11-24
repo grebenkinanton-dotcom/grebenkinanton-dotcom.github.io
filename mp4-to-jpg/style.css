@@ -218,6 +218,7 @@ td.st-error { color: var(--error); }
 }
 .dlg-buttons .btn { min-width: 110px; }
 .hint { font-size: 12px; color: var(--muted); }
+.preview .hint { margin-top: 6px; line-height: 16px; }
 .error { color: var(--error); min-height: 20px; margin-top: 8px; }
 .preview { border: 1px solid var(--card-border); border-radius: 4px; padding: 8px 12px; margin: 4px 0 0; overflow-wrap: anywhere; }
 .preview legend { color: var(--muted); padding: 0 4px; font-size: 12px; }

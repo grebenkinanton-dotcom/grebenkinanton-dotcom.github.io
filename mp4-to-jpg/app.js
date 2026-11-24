@@ -98,6 +98,7 @@ async function pickFolder() {
 
 const items = [];   // { id, file, dir, status, out, tr, zip }
 let outDir = null;  // custom output parent (null = next to each MP4)
+let zipMode = !HAS_FS || store.get("zip", false); // download <name>_seq.zip instead of writing folders
 let running = false;
 let cancelled = false;
 let worker = null;
@@ -106,7 +107,7 @@ let uid = 0;
 const ui = {
   drop: $("drop"), tbody: document.querySelector("#files tbody"), empty: $("empty"),
   remove: $("remove"), clear: $("clear"), outPath: $("out-path"), outChange: $("out-change"),
-  outReset: $("out-reset"), quality: $("quality"), qualityVal: $("quality-val"), start: $("start"),
+  outReset: $("out-reset"), outZip: $("out-zip"), quality: $("quality"), qualityVal: $("quality-val"), start: $("start"),
   convert: $("convert"), cancel: $("cancel"), progress: document.querySelector(".progress"),
   bar: document.querySelector(".progress-bar"), progressText: $("progress-text"), status: $("status"),
 };
@@ -123,8 +124,8 @@ function setProgress(done, total) {
 function outLabel(item, name) {
   const n = name || stem(item.file.name);
   const parent = outDir || item.dir;
-  if (!HAS_FS || item.zip) return `Download → ${seqFolderName(n)}.zip`;
-  return parent ? `${parent.name}\\${seqFolderName(n)}` : `<video folder>\\${seqFolderName(n)}`;
+  if (zipMode) return `Download → ${seqFolderName(n)}.zip`;
+  return parent ? `${parent.name}\\${seqFolderName(n)}` : "Folder will be asked on Convert";
 }
 
 function renderRow(item) {
@@ -152,14 +153,16 @@ function refreshButtons() {
   ui.cancel.disabled = !running;
   ui.clear.disabled = !has || running;
   ui.remove.disabled = running || !items.some((i) => i.tr.classList.contains("sel"));
-  ui.outChange.disabled = running || !HAS_FS;
-  ui.outReset.disabled = running || !outDir;
+  ui.outChange.disabled = running || zipMode;
+  ui.outReset.disabled = running || zipMode || !outDir;
+  ui.outZip.disabled = running || !HAS_FS;
   ui.quality.disabled = ui.start.disabled = running;
   ui.drop.classList.toggle("disabled", running);
 }
 
 function refreshOutPath() {
   if (!HAS_FS) ui.outPath.value = "Downloads → <name>_seq.zip (this browser can't create folders)";
+  else if (zipMode) ui.outPath.value = "Downloads → <name>_seq.zip";
   else if (outDir) ui.outPath.value = `${outDir.name}\\<name>${SEQ_SUFFIX}`;
   else ui.outPath.value = `Automatic: next to each MP4 → <video folder>\\<name>${SEQ_SUFFIX}`;
   items.forEach((i) => { if (!i.out) renderRow(i); });
@@ -233,10 +236,10 @@ function afterAdd(added, skipped) {
 function askName(item, remaining) {
   const dlg = $("name-dlg");
   const name = $("dlg-name"), keep = $("dlg-keep"), all = $("dlg-all");
-  const ok = $("dlg-ok"), err = $("dlg-error");
-  const folderBox = $("dlg-folder"), folderBtn = $("dlg-folder-btn"), hint = $("dlg-folder-hint");
+  const ok = $("dlg-ok"), err = $("dlg-error"), note = $("dlg-prev-note");
+  // Where it goes is decided by the main window's Output settings.
+  const zip = zipMode;
   let dir = outDir || item.dir;
-  let zip = !HAS_FS || !!item.zip;
 
   $("dlg-video").textContent = item.file.name;
   $("dlg-all-text").textContent = `Keep the name for the remaining ${remaining} file(s) too`;
@@ -254,39 +257,14 @@ function askName(item, remaining) {
     const bad = [...new Set([...name.value].filter((c) => INVALID.includes(c)))];
     err.textContent = bad.length ? `Not allowed in file names: ${bad.join(" ")} (they will be removed)` : n ? "" : "Please enter a name.";
 
-    folderBtn.hidden = !HAS_FS;
-    if (zip) {
-      folderBox.textContent = `Downloads (as ${seqFolderName(n || "name")}.zip)`;
-      hint.innerHTML = HAS_FS ? `<button type="button" class="link" id="dlg-to-folder">Save into a folder instead</button>` : "This browser can't create folders, so the frames are downloaded as one ZIP.";
-    } else if (dir) {
-      folderBox.textContent = dir.name;
-      hint.innerHTML = `The folder <b></b> is created here. <button type="button" class="link" id="dlg-to-zip">Download as ZIP instead</button>`;
-      hint.querySelector("b").textContent = seqFolderName(n || "name");
-    } else {
-      folderBox.textContent = "Not chosen yet";
-      hint.innerHTML = `Click <b>Choose…</b> and pick the folder this video is in. <button type="button" class="link" id="dlg-to-zip">Download as ZIP instead</button>`;
-    }
-    const z = $("dlg-to-zip"); if (z) z.onclick = () => { zip = true; update(); };
-    const f = $("dlg-to-folder"); if (f) f.onclick = () => { zip = false; update(); };
-
-    $("dlg-prev-dir").textContent = zip ? `${seqFolderName(n || "name")}.zip` : dir ? `${dir.name}\\${seqFolderName(n || "name")}` : `<video folder>\\${seqFolderName(n || "name")}`;
+    const seq = seqFolderName(n || "name");
+    $("dlg-prev-dir").textContent = zip ? `Download → ${seq}.zip` : dir ? `${dir.name}\\${seq}` : `<folder of ${item.file.name}>\\${seq}`;
     $("dlg-prev-file").textContent = n ? `${frameName(n, +ui.start.value || 0)}, ${frameName(n, (+ui.start.value || 0) + 1)}, …` : "-";
-    ok.disabled = !n || (!zip && !dir);
+    note.hidden = zip || !!dir;
+    note.textContent = `After you click Convert, select the folder that contains ${item.file.name}. The browser can't see where a dropped file came from; the folder is remembered for next time.`;
+    ok.disabled = !n;
   };
 
-  folderBtn.onclick = async () => {
-    const d = await pickFolder();
-    if (d) {
-      dir = d; zip = false;
-      if (!outDir && !(await dirHasFile(d, item.file))) {
-        update();
-        hint.innerHTML = "";
-        hint.append(`${item.file.name} isn't in "${d.name}". The `, Object.assign(document.createElement("b"), { textContent: seqFolderName(sanitize(name.value) || "name") }), " folder will still be created there.");
-        return;
-      }
-    }
-    update();
-  };
   name.oninput = update;
   keep.onchange = () => { update(); if (!keep.checked) { name.focus(); name.select(); } };
 
@@ -294,8 +272,14 @@ function askName(item, remaining) {
     ok.onclick = async (e) => {
       e.preventDefault();
       if (ok.disabled) return;
+      if (!zip && !dir) {
+        const d = await pickFolder();
+        if (!d) { err.textContent = "No folder selected. Click Convert again, or drop the video's folder instead."; return; }
+        dir = d;
+        if (!outDir) item.dir = d;
+      }
       if (!zip && !(await ensureWrite(dir))) {
-        err.textContent = "The browser needs permission to create files in this folder. Click Convert and choose \"Edit files\", or download as ZIP.";
+        err.textContent = "The browser needs permission to create files in this folder. Click Convert and choose \"Edit files\".";
         return;
       }
       dlg.close("ok");
@@ -503,13 +487,13 @@ async function chooseFor(item, remaining, state) {
     const dir = outDir || item.dir;
     const kept = sanitize(stem(item.file.name)) || "frames";
     if (state.keepRest && !forceAsk) {
-      if (state.zip) choice = { name: kept, dir: null, zip: true };
+      if (zipMode) choice = { name: kept, dir: null, zip: true };
       else if (dir && (await ensureWriteQuiet(dir))) choice = { name: kept, dir, zip: false };
     }
     if (!choice) {
       choice = await askName(item, remaining);
       if (!choice) return null;
-      if (choice.keepRest) { state.keepRest = true; state.zip = choice.zip; }
+      if (choice.keepRest) state.keepRest = true;
       if (choice.dir && !outDir && !item.dir) { item.dir = choice.dir; }
     }
     if (choice.zip) return choice;
@@ -535,7 +519,7 @@ async function convertAll() {
   running = true; cancelled = false;
   store.set("quality", +ui.quality.value); store.set("start", +ui.start.value);
   refreshButtons();
-  const state = { keepRest: false, zip: false };
+  const state = { keepRest: false };
   let done = 0, lastLabel = "";
   for (let k = 0; k < queue.length && !cancelled; k++) {
     const item = queue[k];
@@ -612,8 +596,13 @@ function init() {
     refreshButtons();
   };
   ui.clear.onclick = () => { items.splice(0).forEach((i) => i.tr.remove()); setProgress(0, 1); refreshButtons(); };
-  ui.outChange.onclick = async () => { const d = await pickFolder(); if (d) { outDir = d; refreshOutPath(); } };
-  ui.outReset.onclick = () => { outDir = null; refreshOutPath(); };
+  ui.outChange.onclick = async () => {
+    const d = await pickFolder();
+    if (d) { outDir = d; idb.set("outDir", d); refreshOutPath(); }
+  };
+  ui.outReset.onclick = () => { outDir = null; idb.set("outDir", null); refreshOutPath(); };
+  ui.outZip.checked = zipMode;
+  ui.outZip.onchange = () => { zipMode = ui.outZip.checked; store.set("zip", zipMode); refreshOutPath(); };
   ui.convert.onclick = convertAll;
   ui.cancel.onclick = cancel;
   window.addEventListener("beforeunload", (e) => { if (running) { e.preventDefault(); e.returnValue = ""; } });
@@ -638,9 +627,11 @@ function init() {
   }
 
   idb.get("dirs").then((d) => { if (Array.isArray(d)) knownDirs = d; });
+  // The custom output folder is remembered between visits.
+  if (HAS_FS) idb.get("outDir").then((d) => { if (d && d.kind === "directory" && !outDir) { outDir = d; refreshOutPath(); } });
   refreshOutPath();
 }
 
 init();
 // Exposed for automated tests.
-window.__m2j = { sanitize, frameName, seqFolderName, folderSink, zipSink, convertOne, items, addFile };
+window.__m2j = { sanitize, frameName, seqFolderName, folderSink, zipSink, convertOne, items, addFile, idb };
