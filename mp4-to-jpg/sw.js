@@ -1,6 +1,6 @@
 // App-shell cache: the app opens instantly and works offline after the first visit.
 // Network first so updates arrive right away; cache is the fallback.
-const CACHE = "mp4-to-jpg-v1";
+const CACHE = "mp4-to-jpg-v2";
 const SHELL = ["./", "index.html", "style.css", "app.js", "worker.js", "vendor/mp4box.all.min.js",
   "manifest.webmanifest", "icon-192.png", "icon-512.png", "favicon.ico"];
 

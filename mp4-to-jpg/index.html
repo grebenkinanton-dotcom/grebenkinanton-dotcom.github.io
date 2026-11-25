@@ -48,6 +48,51 @@
       </div>
     </section>
 
+    <section class="card" id="trim-card" hidden>
+      <div class="card-head">
+        <h2>Trim <span id="trim-name" class="muted trim-name"></span></h2>
+        <button type="button" id="tl-reset" class="btn">Reset</button>
+      </div>
+      <div class="trim-preview">
+        <video id="trim-video" muted playsinline preload="auto"></video>
+        <div id="trim-msg" class="trim-msg" hidden></div>
+      </div>
+      <div id="timeline" class="timeline" tabindex="0" role="group"
+           aria-label="Timeline. Arrow keys move one frame, I sets the start, O sets the end, Space plays.">
+        <canvas id="tl-thumbs" class="tl-thumbs"></canvas>
+        <div class="tl-dim tl-dim-l"></div>
+        <div class="tl-dim tl-dim-r"></div>
+        <div class="tl-sel"></div>
+        <div class="tl-handle tl-in" data-handle="in" title="Drag to trim the beginning"></div>
+        <div class="tl-handle tl-out" data-handle="out" title="Drag to trim the end"></div>
+        <div class="tl-head"></div>
+      </div>
+      <div class="trim-controls">
+        <div class="row gap">
+          <button type="button" id="tl-prev" class="btn icon" title="Previous frame (←)" aria-label="Previous frame">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10M13 3 6 8l7 5z" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" id="tl-play" class="btn icon" title="Play the kept part (Space)" aria-label="Play">
+            <svg class="i-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.5v11l9-5.5z" fill="currentColor"/></svg>
+            <svg class="i-pause" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z" fill="currentColor"/></svg>
+          </button>
+          <button type="button" id="tl-next" class="btn icon" title="Next frame (→)" aria-label="Next frame">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12 3v10M3 3l7 5-7 5z" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+          </button>
+          <span id="tl-now" class="tl-now"></span>
+        </div>
+        <div class="row gap">
+          <button type="button" id="tl-set-in" class="btn" title="Start the sequence at this frame (I)">Set start</button>
+          <button type="button" id="tl-set-out" class="btn" title="End the sequence at this frame (O)">Set end</button>
+        </div>
+      </div>
+      <div class="trim-readout">
+        <label class="tl-num">Start frame <input id="tl-in-num" class="input" type="number" min="1" step="1"> <span id="tl-in-time" class="muted"></span></label>
+        <label class="tl-num">End frame <input id="tl-out-num" class="input" type="number" min="1" step="1"> <span id="tl-out-time" class="muted"></span></label>
+        <span id="tl-count" class="tl-count"></span>
+      </div>
+    </section>
+
     <section class="card">
       <div class="card-head"><h2>Output</h2></div>
       <div class="field">

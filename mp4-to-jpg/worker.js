@@ -15,7 +15,9 @@ let waiters = [];
 
 self.onmessage = (e) => {
   const m = e.data;
-  if (m.type === "start") run(m).catch((err) => post({ type: "error", message: String(err && err.message || err) }));
+  const fail = (err) => post({ type: "error", message: String(err && err.message || err) });
+  if (m.type === "start") run(m).catch(fail);
+  else if (m.type === "probe") probe(m.file).catch(fail);
   else if (m.type === "ack") { inFlight--; poke(); }
   else if (m.type === "cancel") { cancelled = true; poke(); }
 };
@@ -79,23 +81,64 @@ function rotationOf(track) {
   return ((deg % 360) + 360) % 360;
 }
 
-// ---------------------------------------------------------------- main job
+// ---------------------------------------------------------------- movie facts
 
-async function run({ file, quality, forceFallback }) {
+const usOf = (s) => Math.round(1e6 * s.cts / s.timescale);
+
+// Frame list in display order: times (seconds from the first frame) and the
+// exact timestamps the decoder will report, so frame N means the same frame
+// in the timeline, the preview and the conversion.
+async function describe(file) {
   const { mp4, info } = await readMovie(file);
   const track = info.videoTracks && info.videoTracks[0];
   if (!track) throw new Error("No video track found in this file.");
-
   const samples = mp4.getTrackById(track.id).samples || [];
   const fps = track.nb_samples && track.duration && track.timescale
     ? track.nb_samples / (track.duration / track.timescale) : 0;
+  const shown = samples.map((s) => s.cts).sort((a, b) => a - b);
+  const ts = track.timescale || 1;
+  const times = new Float64Array(shown.length);
+  const ctsUs = new Float64Array(shown.length);
+  shown.forEach((c, i) => { times[i] = (c - shown[0]) / ts; ctsUs[i] = Math.round(1e6 * c / ts); });
   const meta = {
     total: samples.length || track.nb_samples || 0,
     fps: Math.round(fps * 1000) / 1000,
+    duration: track.duration && track.timescale ? track.duration / track.timescale : 0,
     width: track.video ? track.video.width : track.track_width,
     height: track.video ? track.video.height : track.track_height,
     codec: track.codec,
+    rotation: rotationOf(track),
   };
+  return { mp4, track, samples, meta, times, ctsUs };
+}
+
+async function probe(file) {
+  const { meta, times, ctsUs } = await describe(file);
+  post({ type: "meta", ...meta, times, ctsUs }, [times.buffer, ctsUs.buffer]);
+}
+
+// ---------------------------------------------------------------- main job
+
+async function run({ file, quality, forceFallback, trimStart, trimEnd }) {
+  const { mp4, track, samples, meta, ctsUs } = await describe(file);
+
+  // Kept part, as frame indices in display order (inclusive).
+  const n = ctsUs.length;
+  const first = n ? Math.max(0, Math.min(n - 1, trimStart ?? 0)) : 0;
+  const last = n ? Math.max(first, Math.min(n - 1, trimEnd ?? n - 1)) : 0;
+  const inUs = n ? ctsUs[first] : 0, outUs = n ? ctsUs[last] : Infinity;
+  const inRange = (us) => us >= inUs && us <= outUs;
+
+  // Samples to feed (decode order): from a keyframe before the first needed
+  // frame up to the last frame needed. One extra keyframe back covers
+  // open-GOP leading pictures.
+  let minIdx = samples.length, maxIdx = -1;
+  samples.forEach((s, i) => { if (inRange(usOf(s))) { minIdx = Math.min(minIdx, i); maxIdx = Math.max(maxIdx, i); } });
+  let from = Math.min(minIdx, samples.length - 1);
+  while (from > 0 && !samples[from].is_sync) from--;
+  if (from > 0) { from--; while (from > 0 && !samples[from].is_sync) from--; }
+  const feed = maxIdx >= 0 ? samples.slice(Math.max(0, from), maxIdx + 1) : [];
+  meta.total = n ? last - first + 1 : meta.total;
 
   const config = {
     codec: track.codec.startsWith("vp08") ? "vp8" : track.codec,
@@ -106,7 +149,7 @@ async function run({ file, quality, forceFallback }) {
   const cs = colorSpaceFor(mp4, track.id, meta.height);
   if (cs) config.colorSpace = cs;
   let supported = false;
-  if (!forceFallback && typeof VideoDecoder !== "undefined" && samples.length) {
+  if (!forceFallback && typeof VideoDecoder !== "undefined" && feed.length) {
     try { supported = (await VideoDecoder.isConfigSupported(config)).supported; } catch { supported = false; }
   }
   if (!supported) {
@@ -115,7 +158,7 @@ async function run({ file, quality, forceFallback }) {
   }
   post({ type: "info", ...meta });
 
-  const rotation = rotationOf(track);
+  const rotation = meta.rotation;
   let canvas = null, ctx = null;
   let emitted = 0;
   let chain = Promise.resolve();
@@ -153,13 +196,16 @@ async function run({ file, quality, forceFallback }) {
   };
 
   const decoder = new VideoDecoder({
-    output: (frame) => { queued++; chain = chain.then(() => encode(frame)); },
+    output: (frame) => {
+      if (!inRange(frame.timestamp)) { frame.close(); return; } // decoded only as a reference
+      queued++; chain = chain.then(() => encode(frame));
+    },
     error: (e) => { decodeError = e; poke(); },
   });
   decoder.configure(config);
 
   // Feed samples in decode order, reading each one straight from the file.
-  for (const s of samples) {
+  for (const s of feed) {
     if (cancelled || decodeError) break;
     while ((decoder.decodeQueueSize > MAX_DECODE_QUEUE || queued > MAX_IN_FLIGHT) && !cancelled && !decodeError) {
       await waitTick();
@@ -167,7 +213,7 @@ async function run({ file, quality, forceFallback }) {
     const data = new Uint8Array(await file.slice(s.offset, s.offset + s.size).arrayBuffer());
     decoder.decode(new EncodedVideoChunk({
       type: s.is_sync ? "key" : "delta",
-      timestamp: Math.round(1e6 * s.cts / s.timescale),
+      timestamp: usOf(s),
       duration: Math.round(1e6 * s.duration / s.timescale),
       data,
     }));

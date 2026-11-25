@@ -7,11 +7,12 @@ Turn MP4 videos into JPG image sequences, right in the browser. Nothing to downl
 ## How to use it
 
 1. Drag **the folder containing your MP4s**, or the MP4 files themselves, onto the page.
-2. Click **Convert**.
-3. For each video, choose a **file name** or tick **Keep the name**.
+2. Optional: trim the start and end of each video on the timeline (see **Trim** below).
+3. Click **Convert**.
+4. For each video, choose a **file name** or tick **Keep the name**.
    - If you dropped single files, the first **Convert** asks you to select the video's folder, once. The browser can't see where a dropped file came from. Dropping the folder instead skips this step.
    - The browser asks once whether the page may **edit files** in that folder. Click **Edit files**.
-4. Frames are written next to the video:
+5. Frames are written next to the video:
 
 ```
 clips\shot.mp4
@@ -25,6 +26,21 @@ clips\shot_seq\shot_f0002.jpg
 - **JPG quality**: the default is 92. **First frame number**: the default is 1.
 - If the folder already holds frames with that name, you can **Replace** them or **Choose another name**.
 - **Download as ZIP instead** (under Output path) saves `name_seq.zip`, which contains the `name_seq` folder. This is useful for system folders such as the Desktop, which the browser won't let pages write to. It's also the automatic choice in browsers that can't create folders, such as Firefox.
+
+## Trim (convert only part of a video)
+
+Click a video in the **Files** list. The **Trim** panel shows a preview and a timeline:
+
+- Drag the blue handles to cut off the beginning and the end. The dimmed parts are skipped.
+- Click or drag on the timeline to move the playhead. ▶ plays only the kept part, and ◀| / |▶ step one frame.
+- **Set start** / **Set end** trim at the playhead. You can also type exact **Start frame** / **End frame** numbers. **Reset** keeps the whole video.
+- Keyboard, with the timeline focused:
+  - ← / → step one frame. Shift moves 10.
+  - **I** / **O** set the start / end.
+  - Space plays.
+  - Home / End jump to the first / last frame.
+
+The kept part is numbered from **First frame number**, e.g. `shot_f0001.jpg … shot_f0129.jpg`. Each video in the list keeps its own trim, and the Status column shows it as `Waiting · 129/250 frames`.
 
 ## Install as an app (optional)
 

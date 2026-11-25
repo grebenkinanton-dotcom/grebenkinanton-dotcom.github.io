@@ -133,8 +133,11 @@ function renderRow(item) {
     item.tr = document.createElement("tr");
     item.tr.innerHTML = "<td></td><td class='col-out'></td><td class='col-status'></td>";
     item.tr.addEventListener("click", (e) => {
-      if (!e.ctrlKey && !e.metaKey) items.forEach((i) => i.tr.classList.remove("sel"));
-      item.tr.classList.toggle("sel");
+      if (!e.ctrlKey && !e.metaKey) {
+        items.forEach((i) => i.tr.classList.remove("sel"));
+        item.tr.classList.add("sel");
+        if (!running) trim.select(item);
+      } else item.tr.classList.toggle("sel");
       refreshButtons();
     });
     ui.tbody.appendChild(item.tr);
@@ -142,7 +145,8 @@ function renderRow(item) {
   const [c1, c2, c3] = item.tr.children;
   c1.textContent = item.file.name; c1.title = item.file.name;
   c2.textContent = item.out || outLabel(item); c2.title = c2.textContent;
-  c3.textContent = item.status;
+  c3.textContent = item.status === "Waiting" && isTrimmed(item)
+    ? `Waiting · ${keptCount(item)}/${item.meta.total} frames` : item.status;
   c3.className = "col-status" + (item.status === "Done" ? " st-done" : /error|failed/i.test(item.status) ? " st-error" : "");
 }
 
@@ -158,6 +162,7 @@ function refreshButtons() {
   ui.outZip.disabled = running || !HAS_FS;
   ui.quality.disabled = ui.start.disabled = running;
   ui.drop.classList.toggle("disabled", running);
+  if (trim.item) trim.render();
 }
 
 function refreshOutPath() {
@@ -227,6 +232,11 @@ async function handleDrop(dt) {
 
 function afterAdd(added, skipped) {
   refreshButtons();
+  if (!trim.item && items.length) {
+    items[0].tr.classList.add("sel");
+    trim.select(items[0]);
+    refreshButtons();
+  }
   if (added) status(`Added ${added} video(s). Click Convert to start.`);
   else if (skipped) status("Only .mp4, .m4v and .mov files can be added (or they're already in the list).");
 }
@@ -259,7 +269,10 @@ function askName(item, remaining) {
 
     const seq = seqFolderName(n || "name");
     $("dlg-prev-dir").textContent = zip ? `Download → ${seq}.zip` : dir ? `${dir.name}\\${seq}` : `<folder of ${item.file.name}>\\${seq}`;
-    $("dlg-prev-file").textContent = n ? `${frameName(n, +ui.start.value || 0)}, ${frameName(n, (+ui.start.value || 0) + 1)}, …` : "-";
+    const s0 = +ui.start.value || 0, cnt = keptCount(item);
+    $("dlg-prev-file").textContent = !n ? "-" : cnt
+      ? `${frameName(n, s0)} … ${frameName(n, s0 + cnt - 1)} (${cnt} frames${isTrimmed(item) ? ", trimmed" : ""})`
+      : `${frameName(n, s0)}, ${frameName(n, s0 + 1)}, …`;
     note.hidden = zip || !!dir;
     note.textContent = `After you click Convert, select the folder that contains ${item.file.name}. The browser can't see where a dropped file came from; the folder is remembered for next time.`;
     ok.disabled = !n;
@@ -376,9 +389,281 @@ function zipSink(name) {
   };
 }
 
+// ------------------------------------------------------------------ trim (timeline)
+
+// Frame facts for a video: exact frame times from the MP4 (worker probe), or
+// an estimate from the <video> element when the MP4 can't be read that way.
+function probeWorker(file) {
+  return new Promise((resolve, reject) => {
+    const w = new Worker("worker.js");
+    w.onmessage = (e) => {
+      if (e.data.type === "meta") { w.terminate(); resolve(e.data); }
+      else if (e.data.type === "error") { w.terminate(); reject(new Error(e.data.message)); }
+    };
+    w.onerror = (e) => { w.terminate(); reject(new Error(e.message || "probe failed")); };
+    w.postMessage({ type: "probe", file });
+  });
+}
+async function ensureMeta(item, video) {
+  if (item.meta) return item.meta;
+  if (!item.metaPromise) {
+    item.metaPromise = probeWorker(item.file).then((m) => {
+      if (!m.total || !m.times || !m.times.length) throw new Error("no sample table");
+      if (!(m.fps > 0)) m.fps = m.total > 1 ? (m.total - 1) / (m.times[m.total - 1] || 1) : 30;
+      return m;
+    }).catch(async () => {
+      // Estimate from the browser's own player (e.g. fragmented MP4).
+      const v = video || document.createElement("video");
+      if (!v.duration || isNaN(v.duration)) {
+        const url = URL.createObjectURL(item.file);
+        v.src = url;
+        try { await once(v, "loadedmetadata", "error"); } catch { /* unknown */ }
+      }
+      const fps = 30, total = Math.max(1, Math.round((v.duration || 0) * fps));
+      const times = new Float64Array(total).map((_, i) => i / fps);
+      return { total, fps, duration: v.duration || 0, times, ctsUs: null, approx: true };
+    });
+  }
+  item.meta = await item.metaPromise;
+  if (!item.trim) item.trim = { start: 0, end: item.meta.total - 1 };
+  return item.meta;
+}
+const isTrimmed = (item) => item.meta && item.trim && (item.trim.start > 0 || item.trim.end < item.meta.total - 1);
+const keptCount = (item) => (item.meta && item.trim ? item.trim.end - item.trim.start + 1 : 0);
+
+function fmtTime(sec) {
+  if (!isFinite(sec)) sec = 0;
+  const ms = Math.round(sec * 1000);
+  const h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(ms % 1000).padStart(3, "0")}`;
+}
+
+const trim = {
+  item: null, cur: 0, playing: false, drag: null, thumbToken: 0, url: null,
+  card: $("trim-card"), video: $("trim-video"), msg: $("trim-msg"), tl: $("timeline"), canvas: $("tl-thumbs"),
+
+  async select(item) {
+    if (this.item === item) return;
+    this.pause();
+    this.item = item;
+    this.card.hidden = !item;
+    if (!item) { this.setSrc(null); return; }
+    $("trim-name").textContent = item.file.name;
+    this.msg.hidden = true;
+    this.setSrc(item.file);
+    this.render();
+    await ensureMeta(item, null);
+    if (this.item !== item) return;
+    this.cur = item.trim.start;
+    this.render();
+    this.seek(this.cur);
+    this.thumbs();
+  },
+
+  setSrc(file) {
+    if (this.url) URL.revokeObjectURL(this.url);
+    this.url = file ? URL.createObjectURL(file) : null;
+    if (this.url) this.video.src = this.url; else { this.video.removeAttribute("src"); this.video.load(); }
+  },
+
+  frameTime(i) {
+    const m = this.item.meta;
+    const t = m.times[Math.max(0, Math.min(m.total - 1, i))] + 0.5 / (m.fps || 30);
+    const d = this.video.duration;
+    return d && isFinite(d) ? Math.min(t, Math.max(0, d - 0.001)) : t;
+  },
+  frameAt(t) { // last frame whose start time <= t
+    const times = this.item.meta.times;
+    let lo = 0, hi = times.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (times[mid] <= t + 1e-4) lo = mid; else hi = mid - 1; }
+    return lo;
+  },
+  seek(i) {
+    const m = this.item && this.item.meta;
+    if (!m) return;
+    this.cur = Math.max(0, Math.min(m.total - 1, i));
+    try { this.video.currentTime = this.frameTime(this.cur); } catch { /* not loaded */ }
+    this.render();
+  },
+
+  setIn(i) {
+    const it = this.item; if (!it || !it.meta || running) return;
+    it.trim.start = Math.max(0, Math.min(i, it.trim.end));
+    this.changed();
+  },
+  setOut(i) {
+    const it = this.item; if (!it || !it.meta || running) return;
+    it.trim.end = Math.min(it.meta.total - 1, Math.max(i, it.trim.start));
+    this.changed();
+  },
+  reset() {
+    const it = this.item; if (!it || !it.meta || running) return;
+    it.trim = { start: 0, end: it.meta.total - 1 };
+    this.changed();
+  },
+  changed() { this.render(); renderRow(this.item); },
+
+  play() {
+    const it = this.item; if (!it || !it.meta || this.msg.hidden === false) return;
+    if (this.cur < it.trim.start || this.cur >= it.trim.end) this.seek(it.trim.start);
+    this.playing = true;
+    $("tl-play").classList.add("playing");
+    this.video.play().catch(() => this.pause());
+    const tick = () => {
+      if (!this.playing || this.item !== it) return;
+      const f = this.frameAt(this.video.currentTime);
+      if (f >= it.trim.end || this.video.ended) { this.pause(); this.seek(it.trim.end); return; }
+      this.cur = f; this.render();
+      if (this.video.requestVideoFrameCallback) this.video.requestVideoFrameCallback(tick);
+      else requestAnimationFrame(tick);
+    };
+    tick();
+  },
+  pause() {
+    const was = this.playing;
+    this.playing = false;
+    $("tl-play").classList.remove("playing");
+    try { this.video.pause(); } catch { /* none */ }
+    // Land exactly on the frame that is showing, so readout and picture agree.
+    if (was && this.item && this.item.meta) this.seek(this.frameAt(this.video.currentTime));
+  },
+
+  render() {
+    const it = this.item;
+    const m = it && it.meta;
+    this.tl.classList.toggle("disabled", !m || running);
+    for (const id of ["tl-prev", "tl-play", "tl-next", "tl-set-in", "tl-set-out", "tl-reset", "tl-in-num", "tl-out-num"]) $(id).disabled = !m || running;
+    if (!m) {
+      $("tl-now").textContent = "Reading video…"; $("tl-count").textContent = "";
+      return;
+    }
+    const n = m.total, { start, end } = it.trim;
+    const pct = (f) => `${(100 * f) / n}%`;
+    const q = (sel) => this.tl.querySelector(sel);
+    q(".tl-dim-l").style.width = pct(start);
+    q(".tl-dim-r").style.width = `${(100 * (n - end - 1)) / n}%`;
+    q(".tl-sel").style.left = pct(start);
+    q(".tl-sel").style.right = `${(100 * (n - end - 1)) / n}%`;
+    q(".tl-in").style.left = pct(start);
+    q(".tl-out").style.left = pct(end + 1);
+    q(".tl-head").style.left = pct(this.cur + 0.5);
+    $("tl-now").textContent = `${fmtTime(m.times[this.cur])} · frame ${this.cur + 1}`;
+    const inNum = $("tl-in-num"), outNum = $("tl-out-num");
+    inNum.max = outNum.max = String(n);
+    if (document.activeElement !== inNum) inNum.value = String(start + 1);
+    if (document.activeElement !== outNum) outNum.value = String(end + 1);
+    $("tl-in-time").textContent = fmtTime(m.times[start]);
+    $("tl-out-time").textContent = fmtTime(m.times[end]);
+    $("tl-count").textContent = `${end - start + 1} of ${n} frames${m.approx ? " (approx.)" : ""}`;
+    this.tl.setAttribute("aria-valuetext", `Start frame ${start + 1}, end frame ${end + 1}, playhead frame ${this.cur + 1}`);
+  },
+
+  // Filmstrip of thumbnails across the whole video.
+  async thumbs() {
+    const token = ++this.thumbToken, it = this.item;
+    const c = this.canvas, dpr = window.devicePixelRatio || 1;
+    const W = Math.max(1, Math.round(c.clientWidth * dpr)), H = Math.max(1, Math.round(c.clientHeight * dpr));
+    c.width = W; c.height = H;
+    const ctx = c.getContext("2d");
+    ctx.clearRect(0, 0, W, H);
+    const v = document.createElement("video");
+    v.muted = true; v.preload = "auto";
+    const url = URL.createObjectURL(it.file);
+    v.src = url;
+    try {
+      await once(v, "loadeddata", "error");
+      const aspect = v.videoWidth && v.videoHeight ? v.videoWidth / v.videoHeight : 16 / 9;
+      const count = Math.max(3, Math.round(W / (H * aspect)));
+      const cw = W / count;
+      for (let k = 0; k < count; k++) {
+        if (token !== this.thumbToken) return;
+        v.currentTime = Math.min(v.duration - 0.01, ((k + 0.5) / count) * v.duration);
+        await once(v, "seeked", "error");
+        if (token !== this.thumbToken) return;
+        // cover-fit into the cell
+        const s = Math.max(cw / v.videoWidth, H / v.videoHeight);
+        const dw = v.videoWidth * s, dh = v.videoHeight * s;
+        ctx.save();
+        ctx.beginPath(); ctx.rect(k * cw, 0, cw + 0.5, H); ctx.clip();
+        ctx.drawImage(v, k * cw + (cw - dw) / 2, (H - dh) / 2, dw, dh);
+        ctx.restore();
+      }
+    } catch {
+      if (token === this.thumbToken) {
+        this.msg.hidden = false;
+        this.msg.textContent = "This browser can't preview this video format. You can still trim it with the start and end frame numbers below.";
+      }
+    } finally {
+      URL.revokeObjectURL(url);
+      v.removeAttribute("src"); v.load();
+    }
+  },
+
+  frameFromX(clientX) {
+    const r = this.tl.getBoundingClientRect(), n = this.item.meta.total;
+    return Math.max(0, Math.min(n - 1, Math.floor(((clientX - r.left) / r.width) * n)));
+  },
+  boundaryFromX(clientX) { // nearest frame edge, for handles
+    const r = this.tl.getBoundingClientRect(), n = this.item.meta.total;
+    return Math.max(0, Math.min(n, Math.round(((clientX - r.left) / r.width) * n)));
+  },
+
+  wire() {
+    const tl = this.tl;
+    tl.addEventListener("pointerdown", (e) => {
+      if (!this.item || !this.item.meta || running) return;
+      e.preventDefault();
+      tl.focus();
+      this.pause();
+      const h = e.target.dataset && e.target.dataset.handle;
+      this.drag = h || "head";
+      tl.setPointerCapture(e.pointerId);
+      this.dragMove(e);
+    });
+    tl.addEventListener("pointermove", (e) => { if (this.drag) this.dragMove(e); });
+    const end = () => { this.drag = null; };
+    tl.addEventListener("pointerup", end);
+    tl.addEventListener("pointercancel", end);
+    tl.addEventListener("keydown", (e) => {
+      const it = this.item; if (!it || !it.meta || running) return;
+      const step = e.shiftKey ? 10 : 1;
+      const k = e.key.toLowerCase();
+      if (k === "arrowleft") this.seek(this.cur - step);
+      else if (k === "arrowright") this.seek(this.cur + step);
+      else if (k === "home") this.seek(0);
+      else if (k === "end") this.seek(it.meta.total - 1);
+      else if (k === "i") this.setIn(this.cur);
+      else if (k === "o") this.setOut(this.cur);
+      else if (k === " ") { this.playing ? this.pause() : this.play(); }
+      else return;
+      e.preventDefault();
+    });
+    $("tl-prev").onclick = () => { this.pause(); this.seek(this.cur - 1); };
+    $("tl-next").onclick = () => { this.pause(); this.seek(this.cur + 1); };
+    $("tl-play").onclick = () => (this.playing ? this.pause() : this.play());
+    $("tl-set-in").onclick = () => this.setIn(this.cur);
+    $("tl-set-out").onclick = () => this.setOut(this.cur);
+    $("tl-reset").onclick = () => this.reset();
+    $("tl-in-num").onchange = (e) => { this.setIn((parseInt(e.target.value, 10) || 1) - 1); this.seek(this.item.trim.start); };
+    $("tl-out-num").onchange = (e) => { this.setOut((parseInt(e.target.value, 10) || 1) - 1); this.seek(this.item.trim.end); };
+    this.video.addEventListener("error", () => {
+      if (!this.item) return;
+      this.msg.hidden = false;
+      this.msg.textContent = "This browser can't preview this video format. You can still trim it with the start and end frame numbers below.";
+    });
+    let rt = 0;
+    window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (this.item && this.item.meta) this.thumbs(); }, 200); });
+  },
+  dragMove(e) {
+    if (this.drag === "in") { const b = this.boundaryFromX(e.clientX); this.setIn(Math.min(b, this.item.meta.total - 1)); this.seek(this.item.trim.start); }
+    else if (this.drag === "out") { const b = this.boundaryFromX(e.clientX); this.setOut(Math.max(0, b - 1)); this.seek(this.item.trim.end); }
+    else this.seek(this.frameFromX(e.clientX));
+  },
+};
+
 // ------------------------------------------------------------------ conversion
 
-function extractWithWorker(file, quality, onInfo, onFrame, forceFallback) {
+function extractWithWorker(file, quality, onInfo, onFrame, forceFallback, range) {
   return new Promise((resolve, reject) => {
     worker = new Worker("worker.js");
     worker.onmessage = (e) => {
@@ -390,7 +675,10 @@ function extractWithWorker(file, quality, onInfo, onFrame, forceFallback) {
     };
     worker.onerror = (e) => { cleanup(); reject(new Error(e.message || "Worker failed")); };
     const cleanup = () => { if (worker) { worker.terminate(); worker = null; } };
-    worker.postMessage({ type: "start", file, quality, forceFallback: !!forceFallback });
+    worker.postMessage({
+      type: "start", file, quality, forceFallback: !!forceFallback,
+      trimStart: range ? range.start : undefined, trimEnd: range ? range.end : undefined,
+    });
   });
 }
 
@@ -404,33 +692,54 @@ function once(el, ok, bad) {
 }
 
 // Slower path: seek a <video> element frame by frame (for codecs WebCodecs lacks).
-async function extractWithVideo(file, quality, meta, onInfo, onFrame) {
-  const v = document.createElement("video");
-  v.muted = true; v.preload = "auto"; v.playsInline = true;
+async function extractWithVideo(file, quality, meta, onInfo, onFrame, range) {
   const url = URL.createObjectURL(file);
-  v.src = url;
+  const open = async () => {
+    const el = document.createElement("video");
+    el.muted = true; el.preload = "auto"; el.playsInline = true;
+    el.src = url;
+    await once(el, "loadeddata", "error");
+    return el;
+  };
+  let v = null;
+  // Seek with one recovery: the browser's player can hit a decode error on
+  // some streams after a seek; a fresh player seeking straight there works.
+  const seekTo = async (t) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        v.currentTime = t;
+        await once(v, "seeked", "error");
+        return;
+      } catch (err) {
+        if (attempt > 0) throw err;
+        v.removeAttribute("src"); v.load();
+        v = await open();
+      }
+    }
+  };
   try {
-    await once(v, "loadeddata", "error");
+    v = await open();
     const fps = meta.fps > 0 ? meta.fps : 30;
-    const total = meta.total > 0 ? meta.total : Math.max(1, Math.round(v.duration * fps));
-    onInfo({ total, fps });
+    const all = range ? range.times.length : meta.total > 0 ? meta.total : Math.max(1, Math.round(v.duration * fps));
+    const first = range ? range.start : 0, last = range ? range.end : all - 1;
+    const timeOf = (i) => (range ? range.times[i] : i / fps) + 0.5 / fps;
+    onInfo({ total: last - first + 1, fps });
     const canvas = document.createElement("canvas");
     canvas.width = v.videoWidth; canvas.height = v.videoHeight;
     const ctx = canvas.getContext("2d");
-    let i = 0;
-    for (; i < total && !cancelled; i++) {
-      const t = (i + 0.5) / fps;
+    let count = 0;
+    for (let i = first; i <= last && !cancelled; i++) {
+      const t = timeOf(i);
       if (t >= v.duration) break;
-      v.currentTime = t;
-      await once(v, "seeked", "error");
+      await seekTo(t);
       ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
       const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", quality));
-      await onFrame(i, blob);
+      await onFrame(count++, blob);
     }
-    return { type: cancelled ? "cancelled" : "done", count: i };
+    return { type: cancelled ? "cancelled" : "done", count };
   } finally {
     URL.revokeObjectURL(url);
-    v.removeAttribute("src"); v.load();
+    if (v) { v.removeAttribute("src"); v.load(); }
   }
 }
 
@@ -457,11 +766,14 @@ async function convertOne(item, choice) {
 
   item.status = "Reading…"; renderRow(item);
   setProgress(0, null);
-  let res = await extractWithWorker(item.file, quality, onInfo, onFrame, window.__forceVideoFallback);
+  const range = isTrimmed(item) ? { start: item.trim.start, end: item.trim.end, times: item.meta.times } : null;
+  // An estimated frame list (no MP4 sample table) can only be honoured by the slow path.
+  const force = window.__forceVideoFallback || (range && item.meta.approx);
+  let res = await extractWithWorker(item.file, quality, onInfo, onFrame, force, range);
   if (res.type === "unsupported") {
     item.status = "Converting (slow mode)…"; renderRow(item);
     status(`${item.file.name}: using the slower playback method (${res.reason}).`);
-    res = await extractWithVideo(item.file, quality, res, onInfo, onFrame);
+    res = await extractWithVideo(item.file, quality, res, onInfo, onFrame, range);
   }
   await chain;
   if (res.type === "cancelled" || cancelled) return { status: "Cancelled", count: written, label: sink.label };
@@ -517,6 +829,7 @@ async function convertAll() {
   const todo = items.filter((i) => i.status !== "Done");
   const queue = todo.length ? todo : items.slice();
   running = true; cancelled = false;
+  trim.pause();
   store.set("quality", +ui.quality.value); store.set("start", +ui.start.value);
   refreshButtons();
   const state = { keepRest: false };
@@ -593,9 +906,13 @@ function init() {
 
   ui.remove.onclick = () => {
     for (let k = items.length - 1; k >= 0; k--) if (items[k].tr.classList.contains("sel")) { items[k].tr.remove(); items.splice(k, 1); }
+    if (trim.item && !items.includes(trim.item)) {
+      trim.select(null);
+      if (items.length) { items[0].tr.classList.add("sel"); trim.select(items[0]); }
+    }
     refreshButtons();
   };
-  ui.clear.onclick = () => { items.splice(0).forEach((i) => i.tr.remove()); setProgress(0, 1); refreshButtons(); };
+  ui.clear.onclick = () => { items.splice(0).forEach((i) => i.tr.remove()); trim.select(null); setProgress(0, 1); refreshButtons(); };
   ui.outChange.onclick = async () => {
     const d = await pickFolder();
     if (d) { outDir = d; idb.set("outDir", d); refreshOutPath(); }
@@ -603,6 +920,7 @@ function init() {
   ui.outReset.onclick = () => { outDir = null; idb.set("outDir", null); refreshOutPath(); };
   ui.outZip.checked = zipMode;
   ui.outZip.onchange = () => { zipMode = ui.outZip.checked; store.set("zip", zipMode); refreshOutPath(); };
+  trim.wire();
   ui.convert.onclick = convertAll;
   ui.cancel.onclick = cancel;
   window.addEventListener("beforeunload", (e) => { if (running) { e.preventDefault(); e.returnValue = ""; } });
@@ -634,4 +952,4 @@ function init() {
 
 init();
 // Exposed for automated tests.
-window.__m2j = { sanitize, frameName, seqFolderName, folderSink, zipSink, convertOne, items, addFile, idb };
+window.__m2j = { sanitize, frameName, seqFolderName, folderSink, zipSink, convertOne, items, addFile, idb, trim, ensureMeta };
